@@ -4,8 +4,8 @@
 
 A single-player air traffic control simulator written in Go, with synchronized
 WebGL 2 ground radar and a 3D view from Detroit Metropolitan Airport's control
-tower. The simulation runs in Go; the browser renders the shared live state and
-sends aircraft clearances.
+tower. Each player gets an independent game at the same URL. The simulation runs
+in Go; the browser renders its live state and sends aircraft clearances.
 
 ## Run
 
@@ -29,9 +29,37 @@ go build -buildvcs=false -trimpath -o bin/atc-sim .
 For UI development, use `go run . -dev` to serve editable files from `web/`;
 reload the browser after edits.
 
-Use `-addr 127.0.0.1:8090` to change the listening address. All browser tabs
-connected to one server share one simulation; multiplayer sessions and access
-control are not implemented.
+Use `-addr 127.0.0.1:8090` to change the listening address.
+
+## Independent games
+
+Multiple players can open the same server URL and play independently. Aircraft,
+clearances, pause, speed, traffic flow, resets, and statistics belong to each game.
+No account or room code is needed.
+
+- A browser cookie identifies your game. Refreshing the page resumes it, and
+  tabs in the same browser profile share it. Use a different browser profile or
+  a private window to try another independent game on one computer. Private
+  windows may share cookies with other private windows in the same browser.
+- A game stops advancing when its last connected tab disconnects. Reconnecting
+  resumes it with its previous pause and speed settings. After 30 minutes with
+  no connected tabs, the game expires and the next visit starts a new one.
+- Games are kept in server memory. Restarting the server starts everyone over;
+  open pages reconnect automatically. Cookies must be allowed for the site.
+- The default limit is 256 games, including disconnected games awaiting expiry.
+  If the server is full, new players wait and retry automatically; existing
+  players can continue. Set `-max-sessions` and `-session-timeout` to adjust these
+  limits, for example `go run . -max-sessions 100 -session-timeout 15m`.
+
+To let other players connect over your local network:
+
+```sh
+go run . -addr 0.0.0.0:8080
+```
+
+Share `http://<your-computer-ip>:8080`. For public internet hosting, use an HTTPS
+reverse proxy that passes cookies and streams `/api/events` without buffering.
+The server has no sign-in requirement; anyone who can reach it can start a game.
 
 ## Play
 

@@ -20,7 +20,7 @@ type flight struct {
 }
 
 // Simulation is deterministic for a given command/tick sequence. Its caller
-// must serialize access; the HTTP server holds one mutex around these methods.
+// must serialize access; the HTTP server uses a separate mutex for each game.
 type Simulation struct {
 	airport      Airport
 	graph        taxiGraph

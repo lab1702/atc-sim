@@ -23,16 +23,23 @@ import (
 var assets embed.FS
 
 type server struct {
-	mu      sync.Mutex
-	sim     *sim.Simulation
-	airport sim.Airport
-	webFS   fs.FS
+	mu             sync.Mutex
+	sessions       map[string]*gameSession
+	sessionTimeout time.Duration
+	maxSessions    int
+	airport        sim.Airport
+	webFS          fs.FS
 }
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "HTTP listen address")
 	dev := flag.Bool("dev", false, "Serve UI assets from ./web for development")
+	sessionTimeout := flag.Duration("session-timeout", defaultSessionTimeout, "How long to retain a disconnected game")
+	maxSessions := flag.Int("max-sessions", defaultMaxSessions, "Maximum number of retained player games")
 	flag.Parse()
+	if *sessionTimeout <= 0 || *maxSessions <= 0 {
+		log.Fatal("session-timeout and max-sessions must be positive")
+	}
 	raw, err := assets.ReadFile("data/dtw.json")
 	if err != nil {
 		log.Fatal(err)
@@ -41,7 +48,9 @@ func main() {
 	if err := json.Unmarshal(raw, &airport); err != nil {
 		log.Fatal(err)
 	}
-	s := &server{airport: airport, sim: sim.New(airport)}
+	s := newServer(airport)
+	s.sessionTimeout = *sessionTimeout
+	s.maxSessions = *maxSessions
 	if *dev {
 		s.webFS = os.DirFS("web")
 	}
@@ -68,13 +77,8 @@ func (s *server) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			s.mu.Lock()
-			state := s.sim.Snapshot()
-			if !state.Paused {
-				s.sim.Tick(0.1 * state.Rate)
-			}
-			s.mu.Unlock()
+		case now := <-ticker.C:
+			s.advance(now)
 		}
 	}
 }
@@ -83,36 +87,53 @@ func (s *server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/airport", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.airport) })
 	mux.HandleFunc("GET /api/state", func(w http.ResponseWriter, r *http.Request) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		writeJSON(w, s.sim.Snapshot())
+		game, ok := s.getSession(w, r, true)
+		if !ok {
+			return
+		}
+		game.mu.Lock()
+		state := game.sim.Snapshot()
+		game.mu.Unlock()
+		writeJSON(w, state)
 	})
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.HandleFunc("POST /api/command", func(w http.ResponseWriter, r *http.Request) {
+		game, ok := s.getSession(w, r, false)
+		if !ok {
+			return
+		}
 		var cmd sim.Command
 		if !decode(w, r, &cmd) {
 			return
 		}
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if err := s.sim.Command(cmd); err != nil {
+		game.mu.Lock()
+		err := game.sim.Command(cmd)
+		state := game.sim.Snapshot()
+		game.mu.Unlock()
+		if err != nil {
 			apiError(w, err.Error(), http.StatusConflict)
 			return
 		}
-		writeJSON(w, s.sim.Snapshot())
+		writeJSON(w, state)
 	})
 	mux.HandleFunc("POST /api/control", func(w http.ResponseWriter, r *http.Request) {
+		game, ok := s.getSession(w, r, false)
+		if !ok {
+			return
+		}
 		var ctrl sim.Control
 		if !decode(w, r, &ctrl) {
 			return
 		}
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if err := s.sim.Control(ctrl); err != nil {
+		game.mu.Lock()
+		err := game.sim.Control(ctrl)
+		state := game.sim.Snapshot()
+		game.mu.Unlock()
+		if err != nil {
 			apiError(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, s.sim.Snapshot())
+		writeJSON(w, state)
 	})
 	web, _ := fs.Sub(assets, "web")
 	if s.webFS != nil {
@@ -123,17 +144,17 @@ func (s *server) handler() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'")
-		if r.Method == "POST" {
+		if r.Method == "POST" || r.URL.Path == "/api/state" || r.URL.Path == "/api/events" {
 			origin := r.Header.Get("Origin")
 			if origin != "" {
 				parsed, err := url.Parse(origin)
 				if err != nil || parsed.Host != r.Host {
-					apiError(w, "Cross-origin commands are disabled", http.StatusForbidden)
+					apiError(w, "Cross-origin game requests are disabled", http.StatusForbidden)
 					return
 				}
 			}
 			if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-				apiError(w, "Cross-site commands are disabled", http.StatusForbidden)
+				apiError(w, "Cross-site game requests are disabled", http.StatusForbidden)
 				return
 			}
 		}
@@ -164,6 +185,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 func apiError(w http.ResponseWriter, message string, status int) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
@@ -174,15 +196,21 @@ func (s *server) events(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unavailable", http.StatusInternalServerError)
 		return
 	}
+	game, ok := s.session(w, r, false, true)
+	if !ok {
+		return
+	}
+	defer func() { s.endConnection(game, time.Now()) }()
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		s.mu.Lock()
-		data, err := json.Marshal(s.sim.Snapshot())
-		s.mu.Unlock()
+		game.mu.Lock()
+		state := game.sim.Snapshot()
+		game.mu.Unlock()
+		data, err := json.Marshal(state)
 		if err != nil {
 			return
 		}

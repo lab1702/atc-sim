@@ -33,22 +33,71 @@ let state,
   pending = false,
   lastLog = "",
   uiTime = 0,
-  mode = "map";
+  mode = "map",
+  stream = null,
+  retryTimer = null,
+  streamTimer = null,
+  connecting = false,
+  retryDelay = 1000,
+  connectionAttempt = 0,
+  gameID = null,
+  unconfirmedGames = 0,
+  missedInstruction = false;
 const strips = new Map();
 const dirtyVectors = new Set();
+const gameChannel = createGameChannel();
+
+function createGameChannel() {
+  if (typeof BroadcastChannel === "undefined") return null;
+  try {
+    const channel = new BroadcastChannel("atc-game-session");
+    channel.onmessage = ({ data }) => {
+      if (
+        typeof data === "string" &&
+        data.length > 0 &&
+        data.length <= 128 &&
+        gameID !== null &&
+        data !== gameID
+      )
+        reconnect("Your browser's game changed. Reconnecting…", 0);
+    };
+    return channel;
+  } catch {
+    // Game identity checks also protect browsers without tab messaging.
+    return null;
+  }
+}
 
 function result(message, error = false) {
   $("command-result").textContent = message;
   $("command-result").classList.toggle("error", error);
 }
 async function post(path, body) {
+  if (!connected)
+    throw new Error("Wait for your tower to reconnect before sending instructions.");
+  const attempt = connectionAttempt;
   const response = await fetch(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Game-ID": gameID },
     body: JSON.stringify(body),
   });
+  if (attempt !== connectionAttempt)
+    throw new Error(
+      "The connection changed before this instruction was confirmed. Check your tower before trying again.",
+    );
+  if (response.status === 401) {
+    missedInstruction = true;
+    reconnect("Your game is no longer available. Reconnecting…", 0);
+    throw new Error(
+      "Your game is no longer available. This instruction was not sent. Reconnecting…",
+    );
+  }
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Command was not accepted");
+  if (attempt !== connectionAttempt)
+    throw new Error(
+      "The connection changed before this instruction was confirmed. Check your tower before trying again.",
+    );
   accept(data);
   return data;
 }
@@ -56,7 +105,139 @@ function connection(ok) {
   connected = ok;
   $("connection").classList.toggle("live", ok);
   $("connection-label").textContent = ok ? "CONNECTED" : "RECONNECTING";
+  for (const id of ["pause", "rate", "difficulty", "reset-simulation"])
+    $(id).disabled = !ok;
   if (state) renderUI();
+}
+function closeStream() {
+  clearTimeout(streamTimer);
+  stream?.close();
+  stream = null;
+}
+function reconnect(message, delay = retryDelay) {
+  closeStream();
+  connection(false);
+  result(message, true);
+  if (retryTimer !== null || connecting) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    connectGame();
+  }, delay);
+  retryDelay = Math.min(retryDelay * 2, 30000);
+}
+async function connectGame() {
+  if (connecting) return;
+  connecting = true;
+  connectionAttempt++;
+  connection(false);
+  closeStream();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  let nextDelay = retryDelay;
+  try {
+    const fetchState = () =>
+      fetch("/api/state", {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+    // Tabs sharing cookies must not create their first games simultaneously.
+    const initial =
+      typeof navigator !== "undefined" && navigator.locks
+        ? await navigator.locks.request(
+            "atc-game-session",
+            { signal: controller.signal },
+            fetchState,
+          )
+        : await fetchState();
+    if (!initial.ok) {
+      if (initial.status === 503) {
+        const retryAfter = Number(initial.headers.get("Retry-After"));
+        if (Number.isFinite(retryAfter) && retryAfter > 0)
+          nextDelay = Math.max(nextDelay, Math.min(retryAfter, 120) * 1000);
+        throw new Error("All towers are busy. Waiting for a space…");
+      }
+      throw new Error("Your tower is unavailable. Reconnecting…");
+    }
+    const data = await initial.json();
+    const firstGame = !state;
+    const newGame = initial.headers.get("X-Session-Created") === "true";
+    const nextGameID = initial.headers.get("X-Game-ID");
+    if (!nextGameID)
+      throw new Error("Your game could not be identified. Reconnecting…");
+    const identityChanged = gameID !== nextGameID;
+    const gameChanged = gameID !== null && identityChanged;
+    if (newGame && ++unconfirmedGames >= 3) {
+      $("connection-label").textContent = "OFFLINE";
+      result(
+        "Your browser could not keep your game. Allow cookies for this site, then reload.",
+        true,
+      );
+      return;
+    }
+    if (gameChanged) selectAircraft(null);
+    gameID = nextGameID;
+    if (identityChanged) gameChannel?.postMessage(gameID);
+    accept(data);
+    $("strips").querySelector("p")?.remove();
+    if (firstGame && state.aircraft.length)
+      selectAircraft(
+        state.aircraft.find((a) => a.phase === "holdshort")?.id ||
+          state.aircraft[0].id,
+      );
+    const nextStream = new EventSource(
+      `/api/events?game=${encodeURIComponent(gameID)}`,
+    );
+    stream = nextStream;
+    streamTimer = setTimeout(() => {
+      if (stream === nextStream)
+        reconnect("Your tower is taking too long to respond. Reconnecting…");
+    }, 15000);
+    nextStream.onopen = () => {
+      if (stream !== nextStream) return;
+      clearTimeout(streamTimer);
+      retryDelay = 1000;
+      unconfirmedGames = 0;
+      connection(true);
+      result(
+        missedInstruction
+          ? "Your tower is ready. Your last instruction was not sent; review your game before continuing."
+          : newGame && !firstGame
+            ? "Your previous game ended. A new game is ready."
+            : gameChanged
+              ? "Your browser switched games. Review your tower before continuing."
+              : firstGame
+                ? ""
+                : "Reconnected to your tower.",
+      );
+      missedInstruction = false;
+    };
+    nextStream.onmessage = (e) => {
+      if (stream !== nextStream) return;
+      try {
+        accept(JSON.parse(e.data));
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    nextStream.onerror = () => {
+      if (stream === nextStream)
+        reconnect("Connection lost. Reconnecting to your tower…");
+    };
+  } catch (e) {
+    // Retry only the session connection; the airport views stay initialized.
+    connecting = false;
+    reconnect(
+      e.name === "AbortError"
+        ? "Your tower is taking too long to respond. Reconnecting…"
+        : e.name === "TypeError"
+          ? "Your tower is unavailable. Reconnecting…"
+          : e.message,
+      nextDelay,
+    );
+  } finally {
+    clearTimeout(timeout);
+    connecting = false;
+  }
 }
 function accept(data) {
   state = data;
@@ -208,7 +389,7 @@ function renderUI() {
 }
 
 async function issue(action, values = {}) {
-  if (!selected || pending) return;
+  if (!selected || pending || !connected) return;
   pending = true;
   renderUI();
   try {
@@ -226,12 +407,16 @@ async function control(values) {
   try {
     await post("/api/control", values);
     renderUI();
+    return true;
   } catch (e) {
     result(e.message, true);
+    return false;
   }
 }
 
 async function boot() {
+  connection(false);
+  $("connection-label").textContent = "CONNECTING";
   try {
     const response = await fetch("/api/airport");
     if (!response.ok) throw new Error("Airport data could not be loaded");
@@ -274,20 +459,6 @@ async function boot() {
       $("render-status").textContent = "WebGL unavailable";
       console.error(e);
     }
-    const initial = await fetch("/api/state");
-    if (!initial.ok) throw new Error("Simulation is unavailable");
-    accept(await initial.json());
-    $("strips").querySelector("p")?.remove();
-    const stream = new EventSource("/api/events");
-    stream.onopen = () => connection(true);
-    stream.onmessage = (e) => {
-      try {
-        accept(JSON.parse(e.data));
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    stream.onerror = () => connection(false);
     let lastFrame = performance.now(),
       frames = 0;
     function animate(now) {
@@ -304,11 +475,7 @@ async function boot() {
       }
     }
     requestAnimationFrame(animate);
-    if (state.aircraft.length)
-      selectAircraft(
-        state.aircraft.find((a) => a.phase === "holdshort")?.id ||
-          state.aircraft[0].id,
-      );
+    connectGame();
   } catch (e) {
     if ($("loading")) $("loading").textContent = e.message;
     connection(false);
@@ -396,7 +563,7 @@ $("help-button").addEventListener("click", () => $("help").showModal());
 for (const id of ["close-help", "start-playing"])
   $(id).addEventListener("click", () => $("help").close());
 $("reset-simulation").addEventListener("click", async () => {
-  await control({ reset: true });
+  if (!(await control({ reset: true }))) return;
   selectAircraft(
     state?.aircraft.find((a) => a.phase === "holdshort")?.id || null,
   );
