@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#10191c" />
+    <meta
+      name="description"
+      content="A live Detroit Metropolitan Airport tower simulator with synchronized WebGL ground and tower views."
+    />
+    <title>DTW · Metro Tower</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">✈</span
+        ><strong>DTW<span>METRO TOWER</span></strong
+        ><span class="edition">SIMULATOR</span>
+      </div>
+      <div class="session-status">
+        <span id="connection" class="status-dot"></span
+        ><span id="connection-label">CONNECTING</span
+        ><span class="divider"></span><time id="clock">00:00:00</time>
+      </div>
+      <div class="session-controls">
+        <button id="pause" aria-label="Pause simulation">
+          Ⅱ <span>Pause</span></button
+        ><label class="sr-only" for="rate">Simulation speed</label
+        ><select id="rate">
+          <option value="1">1× speed</option>
+          <option value="2">2× speed</option>
+          <option value="4">4× speed</option>
+          <option value="8">8× speed</option></select
+        ><button id="help-button" class="icon-button" aria-label="How to play">
+          ?
+        </button>
+      </div>
+    </header>
+    <main class="workspace">
+      <aside class="traffic-panel panel">
+        <div class="panel-heading">
+          <h1>Flight strips</h1>
+          <span id="traffic-count" class="count">0</span>
+        </div>
+        <div class="traffic-setting">
+          <label for="difficulty">TRAFFIC FLOW</label
+          ><select id="difficulty">
+            <option value="easy">Light</option>
+            <option value="normal" selected>Normal</option>
+            <option value="hard">Busy</option>
+          </select>
+        </div>
+        <div class="traffic-tabs" role="group" aria-label="Filter aircraft">
+          <button class="active" data-filter="all">All</button
+          ><button data-filter="arrival">Arrivals</button
+          ><button data-filter="departure">Departures</button>
+        </div>
+        <div id="strips" class="strips">
+          <p class="muted">Connecting to tower…</p>
+        </div>
+        <div class="session-score">
+          <div><strong id="arrivals-stat">0</strong><span>LANDED</span></div>
+          <div>
+            <strong id="departures-stat">0</strong><span>DEPARTED</span>
+          </div>
+          <div>
+            <strong id="goarounds-stat">0</strong><span>GO-AROUNDS</span>
+          </div>
+        </div>
+      </aside>
+      <section class="map-panel panel">
+        <div class="view-heading">
+          <div>
+            <span class="eyebrow">KDTW · DETROIT METROPOLITAN</span>
+            <h2 id="main-view-title">Ground radar</h2>
+          </div>
+          <div class="segmented" role="group" aria-label="Main view">
+            <button data-view="map" class="active">2D map</button
+            ><button data-view="tower">3D tower</button>
+          </div>
+        </div>
+        <div id="main-viewport" class="viewport">
+          <div class="loading" id="loading">Establishing tower connection…</div>
+          <div class="view-overlay">
+            <span class="north">↑<br />N</span>
+            <div class="map-tools">
+              <button id="zoom-in" aria-label="Zoom in">+</button
+              ><button id="zoom-out" aria-label="Zoom out">−</button
+              ><button id="reset-view" aria-label="Reset view">⌖</button>
+            </div>
+          </div>
+          <div id="main-labels" class="labels"></div>
+          <div class="map-key">
+            <span><i class="mint"></i>Departure</span
+            ><span><i class="amber"></i>Arrival</span
+            ><span><i class="white"></i>Selected route</span>
+          </div>
+          <span class="view-hint" id="view-hint"
+            >Drag to pan · Scroll to zoom · Click an aircraft</span
+          >
+        </div>
+        <div class="runway-bar">
+          <span class="eyebrow">RUNWAYS</span>
+          <div id="runway-status"></div>
+        </div>
+      </section>
+      <aside class="control-column">
+        <section class="tower-panel panel">
+          <div class="panel-heading">
+            <h2 id="secondary-view-title">Tower view</h2>
+            <span class="live-tag">LIVE</span>
+          </div>
+          <div id="secondary-viewport" class="viewport">
+            <div id="secondary-labels" class="labels"></div>
+            <span class="tower-hint" id="tower-hint"
+              >Drag to look · Scroll to zoom</span
+            >
+          </div>
+          <div class="tower-footer">
+            <span id="camera-label">CONTROL TOWER</span
+            ><button id="track-selected">Track selected ↗</button>
+          </div>
+        </section>
+        <section class="command-panel panel">
+          <div class="panel-heading">
+            <h2>Aircraft control</h2>
+            <span class="eyebrow" id="selected-kind">SELECT A FLIGHT</span>
+          </div>
+          <div id="empty-selection" class="empty-selection">
+            <span>⌖</span>
+            <p>
+              Select an aircraft on the map or a flight strip to issue a
+              clearance.
+            </p>
+          </div>
+          <div id="selected-control" hidden>
+            <div class="aircraft-identity">
+              <div>
+                <h3 id="selected-callsign"></h3>
+                <span id="selected-type" class="muted"></span>
+              </div>
+              <span id="selected-phase" class="phase"></span>
+            </div>
+            <div class="telemetry">
+              <div>
+                <span>HEADING</span><strong id="selected-heading">—</strong>
+              </div>
+              <div>
+                <span>ALTITUDE</span><strong id="selected-altitude">—</strong>
+              </div>
+              <div>
+                <span>SPEED</span><strong id="selected-speed">—</strong>
+              </div>
+            </div>
+            <p id="clearance" class="clearance"></p>
+            <div id="aircraft-alert" class="aircraft-alert" hidden></div>
+            <label class="field-label" for="runway">ASSIGNED RUNWAY</label
+            ><select id="runway"></select>
+            <div class="clearance-actions">
+              <button data-action="taxi">Taxi to runway</button
+              ><button data-action="hold">Hold position</button
+              ><button data-action="resume">Resume taxi</button
+              ><button data-action="lineup">Line up & wait</button
+              ><button data-action="takeoff" class="primary">
+                Clear for takeoff ↗</button
+              ><button data-action="land" class="primary">
+                Clear to land ↙</button
+              ><button data-action="goaround" class="warning">Go around</button>
+            </div>
+            <form id="vector-form">
+              <div class="vector-fields">
+                <label
+                  >HDG °<input
+                    id="heading"
+                    type="number"
+                    min="0"
+                    max="359"
+                    step="1"
+                    required /></label
+                ><label
+                  >ALT ft<input
+                    id="altitude"
+                    type="number"
+                    min="1000"
+                    max="15000"
+                    step="100"
+                    required /></label
+                ><label
+                  >SPD kt<input
+                    id="speed"
+                    type="number"
+                    min="100"
+                    max="350"
+                    step="5"
+                    required
+                /></label>
+              </div>
+              <button type="submit" class="full-width">
+                Issue heading / altitude / speed
+              </button>
+            </form>
+          </div>
+          <div id="command-result" role="status" aria-live="polite"></div>
+        </section>
+      </aside>
+      <section class="log-panel panel">
+        <div class="log-title">
+          <h2>Radio & activity</h2>
+          <span class="eyebrow">TOWER LOG</span>
+        </div>
+        <div id="event-log" role="log" aria-label="Recent tower activity"></div>
+      </section>
+    </main>
+    <footer class="statusbar">
+      <span
+        ><span class="status-dot live"></span> SIMULATION-LITE
+        <span class="footer-divider">/</span> SOUTH FLOW</span
+      ><span id="data-credit">DTW airport geometry</span
+      ><span id="render-status">WebGL</span>
+    </footer>
+    <dialog id="help">
+      <div class="dialog-heading">
+        <h2>Your tower. Your clearances.</h2>
+        <button id="close-help" aria-label="Close help">×</button>
+      </div>
+      <p>
+        Keep DTW moving by guiding departures from gate to runway and clearing
+        arrivals to land. Both views show the same simulation.
+      </p>
+      <ol>
+        <li>
+          <strong>Select a flight</strong> on the map or in the flight strips.
+        </li>
+        <li>
+          <strong>Departures:</strong> choose a runway, taxi, then clear for
+          takeoff at the holding point. Line up & wait is optional.
+        </li>
+        <li>
+          <strong>Arrivals:</strong> clear to land before short final (about 1
+          NM). Aircraft go around if no landing clearance is issued.
+        </li>
+        <li>
+          <strong>Watch the runway status.</strong> Occupied or reserved runways
+          reject conflicting clearances. Aircraft taxiing back in yield to
+          nearby traffic.
+        </li>
+      </ol>
+      <p>
+        Use heading, altitude, and speed commands for airborne aircraft. These
+        cancel any landing clearance; clear the aircraft to land again to
+        capture its assigned approach. Space pauses the simulation; Escape
+        clears your selection. Adjust traffic flow or time speed in the
+        controls.
+      </p>
+      <p class="muted">
+        Airport geometry is sourced from OpenStreetMap and checked against the
+        FAA diagram. Aircraft, schedules, weather, and procedures are simplified
+        for play. This is not an operational ATC training tool.
+      </p>
+      <div class="dialog-actions">
+        <button id="reset-simulation" class="warning">Reset session</button
+        ><button id="start-playing" class="primary">Back to tower</button>
+      </div>
+    </dialog>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
