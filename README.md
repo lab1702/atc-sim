@@ -87,4 +87,11 @@ operates the south/west runway ends. It does not model live traffic, NOTAMs,
 weather changes, wake categories, detailed phraseology, displaced thresholds,
 or real-world gate availability. It is not an operational training tool.
 
+## License
+
+Original project source code is licensed under the [MIT License](LICENSE).
+
 Airport geometry is © OpenStreetMap contributors, licensed under ODbL 1.0.
+See [data/SOURCES.md](data/SOURCES.md) for data sources and attribution.
+
+Vendored Three.js retains its own [MIT license](web/vendor/THREE-LICENSE.txt).
