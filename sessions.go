@@ -88,9 +88,15 @@ func (s *server) session(w http.ResponseWriter, r *http.Request, create, connect
 	game := &gameSession{id: hex.EncodeToString(marker[:]), sim: sim.New(s.airport), lastSeen: now}
 	s.sessions[id] = game
 	s.mu.Unlock()
+	// Omit Path so the browser scopes the cookie to the external bootstrap
+	// directory (/api or, behind a prefix-stripping proxy, /atc/api). The
+	// backend cannot infer a stripped public prefix from its request path.
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookieName, Value: id, Path: "/api", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil,
+		Name: sessionCookieName, Value: id, HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		// Caddy supplies the public scheme when terminating HTTPS. This can
+		// only enable Secure; forwarded headers never establish game identity.
+		Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
 	})
 	w.Header().Set("X-Session-Created", "true")
 	w.Header().Set("X-Game-ID", game.id)

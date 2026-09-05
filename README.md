@@ -71,6 +71,44 @@ docker build -t atc-sim:local .
 docker run --rm -p 127.0.0.1:8080:8080 atc-sim:local
 ```
 
+## Caddy under /atc/
+
+The app works at `/` or behind a reverse proxy that strips a public prefix.
+Assets, API calls, live updates, and game cookies follow the public path
+automatically; no base-path flag or cookie rewriting is needed.
+
+For Caddy running on the Docker host, publish the app on port 10111:
+
+```sh
+ATC_PORT=10111 docker compose up --build -d
+```
+
+Or run the Go server directly with `go run . -addr 127.0.0.1:10111`.
+Add this block inside your Caddy site:
+
+```caddyfile
+handle /atc* {
+	redir /atc /atc/ 301
+	uri strip_prefix /atc
+	reverse_proxy localhost:10111
+}
+```
+
+Open `https://<your-domain>/atc/`. The redirect preserves the trailing slash
+needed to resolve the page's relative assets. Separate app mounts on the same
+domain keep their game cookies and browser-tab coordination separate.
+
+Caddy's defaults preserve the public Host for same-origin checks and flush
+Server-Sent Events immediately. Keep those defaults; extra `header_up`,
+`header_down`, and `flush_interval` directives are unnecessary for this setup.
+See [Caddy's reverse proxy documentation](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#streaming).
+When Caddy terminates HTTPS, its `X-Forwarded-Proto` header enables Secure game
+cookies. Keep the app's published port on loopback as in the Compose default.
+
+If Caddy runs in a separate container, `localhost` refers to that container.
+Place both services on the same Docker network and use `reverse_proxy atc-sim:8080`
+instead; the `/atc/` handling stays the same.
+
 ## Independent games
 
 Multiple players can open the same server URL and play independently. Aircraft,

@@ -1,5 +1,9 @@
 import { AirportView } from "./render.js";
 
+// Resolve from this module so proxies can mount the app at any stripped prefix.
+const appBase = new URL("./", import.meta.url);
+const apiURL = (path) => new URL(`api/${path}`, appBase);
+const sessionScope = `atc-game-session:${appBase.pathname}`;
 const $ = (id) => document.getElementById(id);
 const escapeText = (s) =>
   String(s ?? "").replace(
@@ -50,7 +54,7 @@ const gameChannel = createGameChannel();
 function createGameChannel() {
   if (typeof BroadcastChannel === "undefined") return null;
   try {
-    const channel = new BroadcastChannel("atc-game-session");
+    const channel = new BroadcastChannel(sessionScope);
     channel.onmessage = ({ data }) => {
       if (
         typeof data === "string" &&
@@ -76,7 +80,7 @@ async function post(path, body) {
   if (!connected)
     throw new Error("Wait for your tower to reconnect before sending instructions.");
   const attempt = connectionAttempt;
-  const response = await fetch(path, {
+  const response = await fetch(apiURL(path), {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Game-ID": gameID },
     body: JSON.stringify(body),
@@ -136,7 +140,7 @@ async function connectGame() {
   let nextDelay = retryDelay;
   try {
     const fetchState = () =>
-      fetch("/api/state", {
+      fetch(apiURL("state"), {
         cache: "no-store",
         signal: controller.signal,
       });
@@ -144,7 +148,7 @@ async function connectGame() {
     const initial =
       typeof navigator !== "undefined" && navigator.locks
         ? await navigator.locks.request(
-            "atc-game-session",
+            sessionScope,
             { signal: controller.signal },
             fetchState,
           )
@@ -185,7 +189,7 @@ async function connectGame() {
           state.aircraft[0].id,
       );
     const nextStream = new EventSource(
-      `/api/events?game=${encodeURIComponent(gameID)}`,
+      apiURL(`events?game=${encodeURIComponent(gameID)}`),
     );
     stream = nextStream;
     streamTimer = setTimeout(() => {
@@ -393,7 +397,7 @@ async function issue(action, values = {}) {
   pending = true;
   renderUI();
   try {
-    await post("/api/command", { aircraftId: selected, action, ...values });
+    await post("command", { aircraftId: selected, action, ...values });
     if (action === "vector") dirtyVectors.clear();
     result("Clearance acknowledged.");
   } catch (e) {
@@ -405,7 +409,7 @@ async function issue(action, values = {}) {
 }
 async function control(values) {
   try {
-    await post("/api/control", values);
+    await post("control", values);
     renderUI();
     return true;
   } catch (e) {
@@ -418,7 +422,7 @@ async function boot() {
   connection(false);
   $("connection-label").textContent = "CONNECTING";
   try {
-    const response = await fetch("/api/airport");
+    const response = await fetch(apiURL("airport"));
     if (!response.ok) throw new Error("Airport data could not be loaded");
     airport = await response.json();
     $("runway").innerHTML = airport.runways

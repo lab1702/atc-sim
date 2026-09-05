@@ -8,7 +8,9 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -72,11 +74,21 @@ func TestIndependentBrowserGames(t *testing.T) {
 }
 
 func TestSessionCookieBootstrap(t *testing.T) {
-	for _, scheme := range []string{"http", "https"} {
-		t.Run(scheme, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, scheme, forwardedProto string
+		secure                       bool
+	}{
+		{"http", "http", "", false},
+		{"https", "https", "", true},
+		{"forwarded https", "http", "https", true},
+		{"forwarded http", "http", "http", false},
+		{"TLS cannot be downgraded", "https", "http", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			s := testServer(t)
 			h := s.handler()
-			req := httptest.NewRequest("GET", scheme+"://example.test/api/state", nil)
+			req := httptest.NewRequest("GET", tc.scheme+"://example.test/api/state", nil)
+			req.Header.Set("X-Forwarded-Proto", tc.forwardedProto)
 			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "attacker-selected-id"})
 			r := httptest.NewRecorder()
 			h.ServeHTTP(r, req)
@@ -92,16 +104,36 @@ func TestSessionCookieBootstrap(t *testing.T) {
 			if cookie == nil || cookie.Value == "" || cookie.Value == "attacker-selected-id" {
 				t.Fatalf("server must generate a new session ID: %v", cookie)
 			}
-			if !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/api" || cookie.Domain != "" {
+			if !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "" || cookie.Domain != "" {
 				t.Fatalf("unexpected cookie scope or protections: %+v", cookie)
 			}
-			if cookie.Secure != (scheme == "https") {
-				t.Fatalf("Secure=%v for %s", cookie.Secure, scheme)
+			if cookie.Secure != tc.secure {
+				t.Fatalf("Secure=%v, want %v", cookie.Secure, tc.secure)
 			}
 			if r.Header().Get("Cache-Control") != "no-store" {
 				t.Fatal("personal state must not be cached")
 			}
-			reuse := httptest.NewRequest("GET", scheme+"://example.test/api/state", nil)
+			// With no explicit Path, browsers scope the cookie to the directory
+			// of the visible bootstrap URL, including any reverse-proxy prefix.
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			browserURL := *req.URL
+			if tc.secure {
+				browserURL.Scheme = "https"
+			}
+			jar.SetCookies(&browserURL, r.Result().Cookies())
+			for _, path := range []string{"/api/state", "/api/control", "/api/events", "/", "/app.js", "/apix/state", "/atc/api/state"} {
+				u, err := url.Parse(browserURL.Scheme + "://example.test" + path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got, want := len(jar.Cookies(u)), strings.HasPrefix(path, "/api/"); (got == 1) != want {
+					t.Fatalf("session cookie at %s: got %d, want present=%v", path, got, want)
+				}
+			}
+			reuse := httptest.NewRequest("GET", tc.scheme+"://example.test/api/state", nil)
 			reuse.AddCookie(cookie)
 			r = httptest.NewRecorder()
 			h.ServeHTTP(r, reuse)
