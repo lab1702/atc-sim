@@ -1,0 +1,19 @@
+services:
+  atc-sim:
+    build: .
+    image: atc-sim:local
+    ports:
+      - "${ATC_BIND_ADDRESS:-127.0.0.1}:${ATC_PORT:-8080}:8080"
+    command:
+      - "-addr"
+      - "0.0.0.0:8080"
+      - "-max-sessions"
+      - "${ATC_MAX_SESSIONS:-256}"
+      - "-session-timeout"
+      - "${ATC_SESSION_TIMEOUT:-30m}"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

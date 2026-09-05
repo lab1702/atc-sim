@@ -31,6 +31,46 @@ reload the browser after edits.
 
 Use `-addr 127.0.0.1:8090` to change the listening address.
 
+## Docker
+
+With Docker Engine or Docker Desktop and the Compose plugin installed:
+
+```sh
+docker compose up --build -d
+```
+
+Open **http://127.0.0.1:8080**. Follow logs with `docker compose logs -f` and
+stop the service with `docker compose down`.
+
+Compose runs the app as a non-root user with a read-only filesystem. The image
+includes the executable, UI, airport data, and license notices; it needs no
+volumes. Games remain in memory and are lost when the container restarts.
+
+These optional environment variables can also be set in a local `.env` file:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ATC_BIND_ADDRESS` | `127.0.0.1` | Host interface to publish on |
+| `ATC_PORT` | `8080` | Host port |
+| `ATC_MAX_SESSIONS` | `256` | Maximum retained games |
+| `ATC_SESSION_TIMEOUT` | `30m` | How long to retain a disconnected game |
+
+For example, to let players on your local network connect on port 8090:
+
+```sh
+ATC_BIND_ADDRESS=0.0.0.0 ATC_PORT=8090 docker compose up --build -d
+```
+
+Share `http://<your-computer-ip>:8090`. For public internet hosting, use the
+HTTPS reverse proxy setup described below.
+
+To build and run without Compose:
+
+```sh
+docker build -t atc-sim:local .
+docker run --rm -p 127.0.0.1:8080:8080 atc-sim:local
+```
+
 ## Independent games
 
 Multiple players can open the same server URL and play independently. Aircraft,
