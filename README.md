@@ -1,5 +1,7 @@
 # DTW Metro Tower
 
+![DTW Metro Tower simulator showing flight strips, ground radar with a selected taxi route, a 3D tower view, and aircraft controls](docs/screenshot.jpg)
+
 A single-player air traffic control simulator written in Go, with synchronized
 WebGL 2 ground radar and a 3D view from Detroit Metropolitan Airport's control
 tower. The simulation runs in Go; the browser renders the shared live state and
