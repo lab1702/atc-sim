@@ -122,6 +122,7 @@ type Command struct {
 	AircraftID string   `json:"aircraftId"`
 	Action     string   `json:"action"`
 	Runway     string   `json:"runway,omitempty"`
+	Gate       string   `json:"gate,omitempty"`
 	Heading    *float64 `json:"heading,omitempty"`
 	Altitude   *float64 `json:"altitude,omitempty"`
 	Speed      *float64 `json:"speed,omitempty"`

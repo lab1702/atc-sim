@@ -175,3 +175,57 @@ func TestTaxiMergeLetsRunwayOwnerVacate(t *testing.T) {
 		})
 	}
 }
+
+func TestOpposingArrivalsCanRerouteToAnotherStand(t *testing.T) {
+	raw, err := os.ReadFile("../../data/dtw.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var airport Airport
+	if err := json.Unmarshal(raw, &airport); err != nil {
+		t.Fatal(err)
+	}
+	s := New(airport)
+	if err := s.Control(Control{Difficulty: textValue("easy")}); err != nil {
+		t.Fatal(err)
+	}
+	a, b := s.flights[2], s.flights[3]
+	for _, command := range []Command{
+		{AircraftID: s.flights[0].ID, Action: "takeoff"},
+		{AircraftID: s.flights[1].ID, Action: "taxi", Runway: "21R"},
+		{AircraftID: a.ID, Action: "land"},
+		{AircraftID: b.ID, Action: "vector", Speed: number(320), Altitude: number(1200)},
+	} {
+		if err := s.Command(command); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 110; i++ {
+		s.Tick(1)
+	}
+	if err := s.Command(Command{AircraftID: b.ID, Action: "land"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 1500; i++ {
+		s.Tick(1)
+	}
+	if a.Phase != "taxi-in" || b.Phase != "taxi-in" || !strings.Contains(a.Alert, b.Callsign) || !strings.Contains(b.Alert, a.Callsign) {
+		t.Fatalf("expected opposing taxi routes: a=%+v b=%+v", a, b)
+	}
+	if err := s.Command(Command{AircraftID: a.ID, Action: "taxi-gate", Gate: "A60"}); err != nil {
+		t.Fatalf("arrival could not be rerouted: %v", err)
+	}
+	for i := 0; i < 12000; i++ {
+		s.Tick(0.1)
+		if a.Phase != "complete" && b.Phase != "complete" && distance(a.Position, b.Position) < 48 {
+			t.Fatal("reroute breached ground separation")
+		}
+		if a.Phase == "complete" && b.Phase == "complete" {
+			if a.Gate != "A60" || b.Gate != "A20" {
+				t.Fatal("arrivals did not park at their assigned stands")
+			}
+			return
+		}
+	}
+	t.Fatalf("reroute did not resolve opposing traffic: a=%+v b=%+v", a, b)
+}

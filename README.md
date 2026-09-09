@@ -156,6 +156,9 @@ The server has no sign-in requirement; anyone who can reach it can start a game.
   **Taxi to runway** again, including to resolve opposing ground traffic.
   Converging taxi routes yield to the nearer aircraft at a merge, with priority
   for aircraft vacating a reserved runway.
+  For opposing arrivals, choose a different free **Destination stand** and issue
+  **Taxi to stand** to reroute one aircraft away from the conflict. A stand
+  clearance resumes a held aircraft; occupied or unreachable stands are rejected.
 - Airborne aircraft accept heading, altitude and speed instructions. Heading
   uses degrees from true north; altitude is feet MSL; speed is knots. A landing
   clearance returns an aircraft to its assigned approach. Issuing a vector

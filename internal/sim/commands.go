@@ -20,6 +20,9 @@ func (s *Simulation) Command(c Command) error {
 	if action == "vector" {
 		return s.vector(f, c)
 	}
+	if action == "taxi-gate" {
+		return s.taxiToGate(f, c.Gate)
+	}
 	if action == "hold" {
 		if f.Phase != "taxi" && f.Phase != "taxi-in" && f.Phase != "lineup" && f.Phase != "holdshort" {
 			return fmt.Errorf("hold position is available while taxiing or holding short")
@@ -148,6 +151,34 @@ func (s *Simulation) Command(c Command) error {
 		return fmt.Errorf("unknown command %q", c.Action)
 	}
 	return nil
+}
+
+func (s *Simulation) taxiToGate(f *flight, gateID string) error {
+	if f.Kind != "arrival" || f.Phase != "taxi-in" {
+		return fmt.Errorf("stand clearance requires an arrival taxiing to a stand")
+	}
+	for _, gate := range s.airport.Gates {
+		if gate.ID != gateID {
+			continue
+		}
+		if !s.gateAvailable(gate, f.ID) {
+			return fmt.Errorf("stand %s is occupied or assigned to another aircraft", gate.ID)
+		}
+		route, err := s.graph.route(f.Position, Point{gate.X, gate.Y})
+		if err != nil {
+			return err
+		}
+		// Reassign only after validating the destination and route. The
+		// landing runway remains reserved until this aircraft vacates it.
+		f.Gate = gate.ID
+		f.Route = route
+		f.holding = false
+		f.TargetSpeed = 15
+		f.Clearance = "Taxi to stand " + gate.ID
+		s.log(f.Callsign+", taxi to stand "+gate.ID, "info")
+		return nil
+	}
+	return fmt.Errorf("unknown stand %q", gateID)
 }
 
 func absHeadingDifference(a, b float64) float64 {

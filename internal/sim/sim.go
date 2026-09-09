@@ -106,21 +106,23 @@ func (s *Simulation) nextFlight(kind string) *flight {
 
 func (s *Simulation) freeGate() (Gate, bool) {
 	for _, g := range s.airport.Gates {
-		free := true
-		for _, f := range s.flights {
-			if f.Phase == "complete" {
-				continue
-			}
-			if (f.Gate == g.ID && (f.Phase == "gate" || f.Phase == "taxi-in")) || (f.Altitude < s.airport.Elevation+20 && distance(f.Position, Point{g.X, g.Y}) < 60) {
-				free = false
-				break
-			}
-		}
-		if free {
+		if s.gateAvailable(g, "") {
 			return g, true
 		}
 	}
 	return Gate{}, false
+}
+
+func (s *Simulation) gateAvailable(g Gate, aircraftID string) bool {
+	for _, f := range s.flights {
+		if f.ID == aircraftID || f.Phase == "complete" {
+			continue
+		}
+		if (f.Gate == g.ID && (f.Phase == "gate" || f.Phase == "taxi-in")) || (f.Altitude < s.airport.Elevation+20 && distance(f.Position, Point{g.X, g.Y}) < 60) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Simulation) spawnDeparture() *flight {

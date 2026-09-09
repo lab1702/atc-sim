@@ -158,8 +158,13 @@
             <div id="aircraft-alert" class="aircraft-alert" hidden></div>
             <label class="field-label" for="runway">ASSIGNED RUNWAY</label
             ><select id="runway"></select>
+            <div id="gate-routing" hidden>
+              <label class="field-label" for="gate">DESTINATION STAND</label>
+              <select id="gate"></select>
+            </div>
             <div class="clearance-actions">
               <button data-action="taxi">Taxi to runway</button
+              ><button data-action="taxi-gate">Taxi to stand</button
               ><button data-action="hold">Hold position</button
               ><button data-action="resume">Resume taxi</button
               ><button data-action="lineup">Line up & wait</button
@@ -243,7 +248,9 @@
         </li>
         <li>
           <strong>Arrivals:</strong> clear to land before short final (about 1
-          NM). Aircraft go around if no landing clearance is issued.
+          NM). Aircraft go around if no landing clearance is issued. While
+          taxiing in, choose a different destination stand and use Taxi to stand
+          to resolve opposing ground traffic.
         </li>
         <li>
           <strong>Watch the runway status.</strong> Occupied or reserved runways

@@ -276,6 +276,7 @@ function selectAircraft(id) {
   const a = state?.aircraft.find((a) => a.id === id);
   if (a) {
     $("runway").value = a.runway;
+    $("gate").value = a.gate || "";
     $("heading").value = Math.round(a.targetHeading ?? a.heading) % 360;
     $("altitude").value = Math.max(
       1200,
@@ -368,6 +369,7 @@ function renderUI() {
         $(id).value = value;
     const enabled = {
       taxi: ["gate", "taxi", "holdshort"].includes(a.phase) && a.kind === "departure",
+      "taxi-gate": a.kind === "arrival" && a.phase === "taxi-in",
       hold: ["taxi", "taxi-in", "lineup"].includes(a.phase),
       resume: a.clearance === "Hold position",
       lineup: a.phase === "holdshort",
@@ -377,12 +379,16 @@ function renderUI() {
     };
     for (const b of document.querySelectorAll("[data-action]")) {
       b.hidden =
+        (b.dataset.action === "taxi-gate" && !enabled["taxi-gate"]) ||
         (["taxi", "lineup", "takeoff"].includes(b.dataset.action) &&
           a.kind === "arrival") ||
         (["land", "goaround"].includes(b.dataset.action) &&
           a.kind === "departure");
       b.disabled = !enabled[b.dataset.action] || !connected || pending;
     }
+    $("gate-routing").hidden = !enabled["taxi-gate"];
+    $("gate").disabled = !enabled["taxi-gate"] || !connected || pending;
+    if (enabled["taxi-gate"] && !$("gate").value) $("gate").value = a.gate;
     for (const input of $("vector-form").querySelectorAll("input,button"))
       input.disabled = !airborne || !connected || pending;
     $("runway").disabled =
@@ -443,6 +449,9 @@ async function boot() {
         (r) =>
           `<option value="${escapeText(r.id)}">${escapeText(r.id)} &nbsp; / &nbsp; ${escapeText(r.opposite)} · ${Math.round(r.length).toLocaleString()} m</option>`,
       )
+      .join("");
+    $("gate").innerHTML = airport.gates
+      .map((g) => `<option value="${escapeText(g.id)}">${escapeText(g.id)}</option>`)
       .join("");
     $("altitude").min = String(
       Math.ceil((airport.elevation + 500) / 100) * 100,
@@ -559,9 +568,11 @@ for (const b of document.querySelectorAll("[data-action]"))
   b.addEventListener("click", () =>
     issue(
       b.dataset.action,
-      ["taxi", "land", "lineup", "takeoff"].includes(b.dataset.action)
-        ? { runway: $("runway").value }
-        : {},
+      b.dataset.action === "taxi-gate"
+        ? { gate: $("gate").value }
+        : ["taxi", "land", "lineup", "takeoff"].includes(b.dataset.action)
+          ? { runway: $("runway").value }
+          : {},
     ),
   );
 for (const id of ["heading", "altitude", "speed"])
