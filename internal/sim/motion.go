@@ -94,6 +94,9 @@ func (s *Simulation) groundBlocked(f *flight, proposed Point) string {
 		if gap < 48 && gap < distance(f.Position, other.Position)-0.001 {
 			return "Ground proximity · holding for " + other.Callsign
 		}
+		if s.yieldsAtMerge(f, other, proposed) {
+			return "Taxi merge · yielding to " + other.Callsign
+		}
 	}
 	for i, r := range s.airport.Runways {
 		if !onRunway(proposed, r, 40) {
@@ -112,6 +115,70 @@ func (s *Simulation) groundBlocked(f *flight, proposed Point) string {
 		}
 	}
 	return ""
+}
+
+// Yield before entering another aircraft's path at a shared taxiway merge.
+// Waiting until the aircraft themselves are 48 metres apart can leave neither
+// able to move. The nearer aircraft leads; IDs resolve equal arrival distances.
+func (s *Simulation) yieldsAtMerge(f, other *flight, proposed Point) bool {
+	if len(f.Route) < 2 || len(other.Route) < 2 {
+		return false
+	}
+	type waypoint struct {
+		index    int
+		distance float64
+	}
+	// Routes share canonical graph vertices. Inspect the complete routes so a
+	// shallow merge is protected even when its common vertex is still far away.
+	otherPoints := make(map[Point]waypoint, len(other.Route))
+	previous, otherDistance := other.Position, 0.0
+	for i, point := range other.Route {
+		otherDistance += distance(previous, point)
+		if _, exists := otherPoints[point]; !exists {
+			otherPoints[point] = waypoint{i, otherDistance}
+		}
+		previous = point
+	}
+	previous, ownDistance := f.Position, 0.0
+	for i, point := range f.Route {
+		ownDistance += distance(previous, point)
+		previous = point
+		shared, exists := otherPoints[point]
+		if !exists {
+			continue
+		}
+		// A crossing or opposing route needs controller intervention; only
+		// sequence routes that continue together in the same direction.
+		if i+1 >= len(f.Route) || shared.index+1 >= len(other.Route) || f.Route[i+1] != other.Route[shared.index+1] {
+			return false
+		}
+		// A runway owner must be able to vacate before crossing traffic can
+		// proceed, so it leads even if the crossing aircraft is nearer.
+		ownRunway, otherRunway := false, false
+		for index, owner := range s.reservations {
+			r := s.airport.Runways[index]
+			ownRunway = ownRunway || (owner == f.ID && onRunway(f.Position, r, 50))
+			otherRunway = otherRunway || (owner == other.ID && onRunway(other.Position, r, 50))
+		}
+		if ownRunway != otherRunway {
+			if ownRunway {
+				return false
+			}
+		} else if shared.distance > ownDistance+0.01 || (math.Abs(shared.distance-ownDistance) <= 0.01 && other.ID > f.ID) {
+			return false
+		}
+		// Keep the loser's stopping point clear of the leader's path, with
+		// room beyond the existing proximity limit for the leader to pass.
+		previous = other.Position
+		for _, next := range other.Route[:shared.index+1] {
+			if distance(proposed, project(proposed, previous, next)) < 60 {
+				return true
+			}
+			previous = next
+		}
+		return false
+	}
+	return false
 }
 
 func (s *Simulation) beginTakeoff(f *flight, r Runway) {
