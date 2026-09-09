@@ -153,6 +153,7 @@ func (s *Simulation) tickTakeoff(f *flight, dt float64) {
 }
 
 func (s *Simulation) tickAirborne(f *flight, dt float64) {
+	const turnRate = 3.0 // Degrees per second.
 	r, index := s.runway(f.Runway)
 	if index < 0 {
 		return
@@ -166,12 +167,23 @@ func (s *Simulation) tickAirborne(f *flight, dt float64) {
 	}
 	if f.Phase == "approach" && !f.manualVector {
 		aim := r.Start
+		runwayDirection := direction(heading(r.Start, r.End))
+		turnRadius := f.Speed * knotsToMPS / (turnRate * math.Pi / 180)
 		if f.finalFix != nil {
 			aim = *f.finalFix
-			if distance(f.Position, aim) < 350 {
+			// A small point capture radius can trap a turning aircraft in an
+			// orbit. Allow room to turn, and capture on the upstream side of
+			// the fix to preserve the final leg's descent distance.
+			captureRadius := turnRadius + 350
+			if distance(f.Position, aim) < captureRadius && dot(sub(f.Position, aim), runwayDirection) <= 0 {
 				f.finalFix = nil
-				aim = r.Start
 			}
+		}
+		if f.finalFix == nil {
+			// Follow a point ahead on the extended runway centerline so the
+			// aircraft finishes its intercept aligned with the runway.
+			along, _ := runwayCoordinates(f.Position, r)
+			aim = add(r.Start, scale(runwayDirection, math.Min(0, along+math.Max(2000, 2*turnRadius))))
 		}
 		f.TargetHeading = heading(f.Position, aim)
 		if f.finalFix != nil {
@@ -187,7 +199,7 @@ func (s *Simulation) tickAirborne(f *flight, dt float64) {
 			}
 		}
 	}
-	f.Heading = normalizedHeading(f.Heading + clamp(headingDifference(f.TargetHeading, f.Heading), -3*dt, 3*dt))
+	f.Heading = normalizedHeading(f.Heading + clamp(headingDifference(f.TargetHeading, f.Heading), -turnRate*dt, turnRate*dt))
 	f.Speed = approach(f.Speed, f.TargetSpeed, 2.5*dt)
 	verticalRate := 2000.0 / 60
 	if f.TargetAltitude < f.Altitude {
