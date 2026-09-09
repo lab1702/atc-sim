@@ -91,7 +91,7 @@ func browserSession(t *testing.T, s *server, client *http.Client, baseURL string
 
 func TestEmbeddedAppAndState(t *testing.T) {
 	s := testServer(t)
-	for _, path := range []string{"/", "/app.js", "/render.js", "/vendor/three.module.js", "/vendor/three.core.js", "/api/airport"} {
+	for _, path := range []string{"/", "/app.js", "/events.js", "/events-worker.js", "/render.js", "/vendor/three.module.js", "/vendor/three.core.js", "/api/airport"} {
 		r := httptest.NewRecorder()
 		s.handler().ServeHTTP(r, httptest.NewRequest("GET", path, nil))
 		if r.Code != 200 {

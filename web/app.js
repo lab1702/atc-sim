@@ -1,4 +1,5 @@
 import { AirportView } from "./render.js";
+import { createGameStream } from "./events.js";
 
 // Resolve from this module so proxies can mount the app at any stripped prefix.
 const appBase = new URL("./", import.meta.url);
@@ -41,6 +42,7 @@ let state,
   stream = null,
   retryTimer = null,
   streamTimer = null,
+  connectController = null,
   connecting = false,
   retryDelay = 1000,
   connectionAttempt = 0,
@@ -80,30 +82,41 @@ async function post(path, body) {
   if (!connected)
     throw new Error("Wait for your tower to reconnect before sending instructions.");
   const attempt = connectionAttempt;
-  const response = await fetch(apiURL(path), {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Game-ID": gameID },
-    body: JSON.stringify(body),
-  });
-  if (attempt !== connectionAttempt)
-    throw new Error(
-      "The connection changed before this instruction was confirmed. Check your tower before trying again.",
-    );
-  if (response.status === 401) {
-    missedInstruction = true;
-    reconnect("Your game is no longer available. Reconnecting…", 0);
-    throw new Error(
-      "Your game is no longer available. This instruction was not sent. Reconnecting…",
-    );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(apiURL(path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Game-ID": gameID },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (attempt !== connectionAttempt)
+      throw new Error(
+        "The connection changed before this instruction was confirmed. Check your tower before trying again.",
+      );
+    if (response.status === 401) {
+      missedInstruction = true;
+      reconnect("Your game is no longer available. Reconnecting…", 0);
+      throw new Error(
+        "Your game is no longer available. This instruction was not sent. Reconnecting…",
+      );
+    }
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Command was not accepted");
+    if (attempt !== connectionAttempt)
+      throw new Error(
+        "The connection changed before this instruction was confirmed. Check your tower before trying again.",
+      );
+    accept(data);
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError")
+      throw new Error("Your instruction timed out. Check your game before trying again.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Command was not accepted");
-  if (attempt !== connectionAttempt)
-    throw new Error(
-      "The connection changed before this instruction was confirmed. Check your tower before trying again.",
-    );
-  accept(data);
-  return data;
 }
 function connection(ok) {
   connected = ok;
@@ -136,6 +149,7 @@ async function connectGame() {
   connection(false);
   closeStream();
   const controller = new AbortController();
+  connectController = controller;
   const timeout = setTimeout(() => controller.abort(), 10000);
   let nextDelay = retryDelay;
   try {
@@ -188,9 +202,7 @@ async function connectGame() {
         state.aircraft.find((a) => a.phase === "holdshort")?.id ||
           state.aircraft[0].id,
       );
-    const nextStream = new EventSource(
-      apiURL(`events?game=${encodeURIComponent(gameID)}`),
-    );
+    const nextStream = createGameStream(apiURL, gameID, sessionScope);
     stream = nextStream;
     streamTimer = setTimeout(() => {
       if (stream === nextStream)
@@ -240,6 +252,7 @@ async function connectGame() {
     );
   } finally {
     clearTimeout(timeout);
+    connectController = null;
     connecting = false;
   }
 }
@@ -354,7 +367,7 @@ function renderUI() {
       if (!dirtyVectors.has(id) && document.activeElement !== $(id))
         $(id).value = value;
     const enabled = {
-      taxi: ["gate", "holdshort"].includes(a.phase) && a.kind === "departure",
+      taxi: ["gate", "taxi", "holdshort"].includes(a.phase) && a.kind === "departure",
       hold: ["taxi", "taxi-in", "lineup"].includes(a.phase),
       resume: a.clearance === "Hold position",
       lineup: a.phase === "holdshort",
@@ -373,7 +386,7 @@ function renderUI() {
     for (const input of $("vector-form").querySelectorAll("input,button"))
       input.disabled = !airborne || !connected || pending;
     $("runway").disabled =
-      !["gate", "holdshort", "approach", "goaround"].includes(a.phase) ||
+      !["gate", "taxi", "holdshort", "approach", "goaround"].includes(a.phase) ||
       !connected ||
       pending;
   } else $("selected-kind").textContent = "SELECT A FLIGHT";
@@ -586,5 +599,16 @@ document.addEventListener("keydown", (e) => {
     if (connected && state) control({ paused: !state.paused });
   }
   if (e.code === "Escape") selectAircraft(null);
+});
+window.addEventListener("pagehide", () => {
+  connectController?.abort();
+  connectionAttempt++;
+  clearTimeout(retryTimer);
+  retryTimer = null;
+  closeStream();
+  connection(false);
+});
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) reconnect("Reconnecting to your tower…", 0);
 });
 boot();

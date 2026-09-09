@@ -116,8 +116,10 @@ clearances, pause, speed, traffic flow, resets, and statistics belong to each ga
 No account or room code is needed.
 
 - A browser cookie identifies your game. Refreshing the page resumes it, and
-  tabs in the same browser profile share it. Use a different browser profile or
-  a private window to try another independent game on one computer. Private
+  tabs in the same browser profile share it and its live-update connection.
+  Older browsers without SharedWorker support use a connection per tab; keep
+  fewer than six tabs open on plain HTTP in those browsers. Use a different
+  browser profile or a private window to try another independent game on one computer. Private
   windows may share cookies with other private windows in the same browser.
 - A game stops advancing when its last connected tab disconnects. Reconnecting
   resumes it with its previous pause and speed settings. After 30 minutes with
@@ -150,6 +152,8 @@ The server has no sign-in requirement; anyone who can reach it can start a game.
   clearance, it goes around. Landing aircraft vacate and taxi back to a stand.
 - Use **Hold position** and **Resume taxi** to manage ground traffic. Runway
   reservations, occupancy, intersecting strips and nearby aircraft are checked.
+  A taxiing departure can be rerouted by selecting another runway and issuing
+  **Taxi to runway** again, including to resolve opposing ground traffic.
 - Airborne aircraft accept heading, altitude and speed instructions. Heading
   uses degrees from true north; altitude is feet MSL; speed is knots. A landing
   clearance returns an aircraft to its assigned approach. Issuing a vector
@@ -178,6 +182,12 @@ The server has no sign-in requirement; anyone who can reach it can start a game.
 ```sh
 go test -race ./...
 go vet ./...
+```
+
+The shared-stream JavaScript tests use Node.js 18 or newer (only for testing):
+
+```sh
+node --test scripts/events-worker.test.cjs
 ```
 
 ## Airport fidelity
