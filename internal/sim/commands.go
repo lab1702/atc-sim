@@ -120,8 +120,8 @@ func (s *Simulation) Command(c Command) error {
 		}
 		s.log(f.Callsign+", "+strings.ToLower(f.Clearance), "success")
 	case "land":
-		if f.Phase != "approach" {
-			return fmt.Errorf("landing clearance requires an aircraft on approach")
+		if f.Phase != "approach" && f.Phase != "goaround" {
+			return fmt.Errorf("landing clearance requires an aircraft on approach or going around")
 		}
 		if err := s.canUseRunway(index, f.ID); err != nil {
 			return err
@@ -131,11 +131,13 @@ func (s *Simulation) Command(c Command) error {
 		s.release(f)
 		s.reservations[index] = f.ID
 		changedRunway := f.Runway != r.ID
+		returningFromGoAround := f.Phase == "goaround"
+		f.Phase = "approach"
 		f.Runway = r.ID
 		f.landingCleared = true
 		f.manualVector = false
 		along, lateral := runwayCoordinates(f.Position, r)
-		if changedRunway || along > -700 || lateral > 1400 || absHeadingDifference(f.Heading, heading(r.Start, r.End)) > 65 {
+		if returningFromGoAround || changedRunway || along > -700 || lateral > 1400 || absHeadingDifference(f.Heading, heading(r.Start, r.End)) > 65 {
 			fix := add(r.Start, scale(direction(heading(r.Start, r.End)), -9000))
 			f.finalFix = &fix
 		}

@@ -154,7 +154,8 @@ The server has no sign-in requirement; anyone who can reach it can start a game.
   uses degrees from true north; altitude is feet MSL; speed is knots. A landing
   clearance returns an aircraft to its assigned approach. Issuing a vector
   cancels any existing landing clearance; clear the aircraft to land again
-  when ready.
+  when ready. **Clear to land** also returns a vectored go-around to an approach
+  fix for the selected runway.
 - Drag and scroll on the ground map to pan and zoom. Drag the tower view to look
   around, scroll to change its field of view, or track the selected aircraft.
   The 2D/3D selector exchanges the main and secondary views.

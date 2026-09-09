@@ -273,33 +273,38 @@ func (s *Simulation) goAround(f *flight, reason string) {
 
 func (s *Simulation) tickLanding(f *flight, dt float64) {
 	r, _ := s.runway(f.Runway)
-	f.Speed = approach(f.Speed, 24, 5.5*dt)
-	f.Position = add(f.Position, scale(direction(f.Heading), f.Speed*knotsToMPS*dt))
 	along, _ := runwayCoordinates(f.Position, r)
-	if f.Speed > 25 || along < math.Min(1300, distance(r.Start, r.End)*0.45) {
-		return
-	}
-	g, ok := s.freeGate()
-	if !ok {
-		f.Speed = 0
-		f.Alert = "No free stand · holding on runway"
-		return
-	}
-	route, err := s.graph.route(f.Position, Point{g.X, g.Y})
-	if err != nil {
+	if f.Speed <= 25 && along >= math.Min(1300, distance(r.Start, r.End)*0.45) {
+		// Check stand and exit availability before moving so a held aircraft
+		// stays stationary, but can resume when a stand becomes available.
+		g, ok := s.freeGate()
+		if !ok {
+			f.Speed = 0
+			f.TargetSpeed = 0
+			f.Alert = "No free stand · holding on runway"
+			return
+		}
+		route, err := s.graph.route(f.Position, Point{g.X, g.Y})
+		if err == nil {
+			f.Route = route
+			f.Gate = g.ID
+			f.Phase = "taxi-in"
+			f.TargetSpeed = 15
+			f.Clearance = "Vacate runway " + r.ID + " · taxi to stand " + g.ID
+			s.log(f.Callsign+" vacating runway "+r.ID+" for stand "+g.ID, "info")
+			return
+		}
 		// Continue at taxi speed to the next mapped exit, never through grass.
 		if along > distance(r.Start, r.End)-180 {
 			f.Speed = 0
+			f.TargetSpeed = 0
 			f.Alert = "No connected runway exit · holding"
+			return
 		}
-		return
 	}
-	f.Route = route
-	f.Gate = g.ID
-	f.Phase = "taxi-in"
-	f.TargetSpeed = 15
-	f.Clearance = "Vacate runway " + r.ID + " · taxi to stand " + g.ID
-	s.log(f.Callsign+" vacating runway "+r.ID+" for stand "+g.ID, "info")
+	f.TargetSpeed = 24
+	f.Speed = approach(f.Speed, f.TargetSpeed, 5.5*dt)
+	f.Position = add(f.Position, scale(direction(f.Heading), f.Speed*knotsToMPS*dt))
 }
 
 func (s *Simulation) checkAirSeparation() {

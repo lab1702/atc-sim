@@ -355,11 +355,11 @@ function renderUI() {
         $(id).value = value;
     const enabled = {
       taxi: ["gate", "holdshort"].includes(a.phase) && a.kind === "departure",
-      hold: ["taxi", "taxi-in"].includes(a.phase),
+      hold: ["taxi", "taxi-in", "lineup"].includes(a.phase),
       resume: a.clearance === "Hold position",
       lineup: a.phase === "holdshort",
       takeoff: ["holdshort", "lineup"].includes(a.phase),
-      land: a.kind === "arrival" && a.phase === "approach",
+      land: a.kind === "arrival" && ["approach", "goaround"].includes(a.phase),
       goaround: a.kind === "arrival" && a.phase === "approach",
     };
     for (const b of document.querySelectorAll("[data-action]")) {
