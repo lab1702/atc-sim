@@ -1,10 +1,66 @@
 package sim
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestManualVectorPersistsAcrossShortFinal(t *testing.T) {
+	s := New(testAirport())
+	f := s.flights[2]
+	isolate(s, f)
+	assignedHeading := normalizedHeading(f.Heading + 1)
+	if err := s.Command(Command{AircraftID: f.ID, Action: "vector", Heading: number(assignedHeading), Altitude: number(6000), Speed: number(180)}); err != nil {
+		t.Fatal(err)
+	}
+	clearance := f.Clearance
+	for i := 0; i < 220; i++ {
+		s.Tick(1)
+		if f.Phase != "approach" || !f.manualVector || f.TargetAltitude != 6000 || f.TargetSpeed != 180 || f.TargetHeading != assignedHeading || f.Clearance != clearance {
+			t.Fatalf("automatic approach logic replaced the manual clearance at %ds: %+v", i+1, f)
+		}
+	}
+	r, _ := s.runway(f.Runway)
+	along, _ := runwayCoordinates(f.Position, r)
+	if along <= 500 || s.stats.GoArounds != 0 || s.stats.Arrivals != 0 {
+		t.Fatal("manual vector did not cross the runway without entering an automatic approach")
+	}
+	if err := s.Command(Command{AircraftID: f.ID, Action: "land"}); err != nil {
+		t.Fatal(err)
+	}
+	if f.manualVector || !f.landingCleared || f.finalFix == nil {
+		t.Fatal("landing clearance did not return the vectored aircraft to its approach")
+	}
+}
+
+func TestGoAroundNeverCommandsDescent(t *testing.T) {
+	for _, altitude := range []float64{1200, 3645, 6000} {
+		t.Run(fmt.Sprintf("altitude=%.0f", altitude), func(t *testing.T) {
+			s := New(testAirport())
+			f := s.flights[2]
+			isolate(s, f)
+			f.Altitude = altitude
+			if err := s.Command(Command{AircraftID: f.ID, Action: "goaround"}); err != nil {
+				t.Fatal(err)
+			}
+			if f.TargetAltitude < altitude || f.TargetAltitude < s.airport.Elevation+3000 {
+				t.Fatalf("go-around commanded a descent: %+v", f)
+			}
+			if altitude >= s.airport.Elevation+3000 && !strings.Contains(f.Clearance, "maintain") {
+				t.Fatalf("level go-around clearance should say maintain: %s", f.Clearance)
+			}
+			for i := 0; i < 60; i++ {
+				before := f.Altitude
+				s.Tick(1)
+				if f.Altitude < before {
+					t.Fatal("aircraft descended during the go-around")
+				}
+			}
+		})
+	}
+}
 
 func TestGoAroundVectorCanReceiveLandingClearance(t *testing.T) {
 	s := New(testAirport())

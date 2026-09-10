@@ -288,7 +288,9 @@ func (s *Simulation) tickAirborne(f *flight, dt float64) {
 		}
 		return
 	}
-	if f.Phase == "approach" {
+	// A manual vector remains in force until another controller instruction;
+	// crossing short final does not itself resume automatic approach handling.
+	if f.Phase == "approach" && !f.manualVector {
 		along, lateral := runwayCoordinates(f.Position, r)
 		if f.finalFix == nil && along > -1600 && along < 300 && lateral < 600 {
 			if !f.landingCleared {
@@ -342,9 +344,13 @@ func (s *Simulation) goAround(f *flight, reason string) {
 	f.Phase = "goaround"
 	f.goAroundUntil = s.time + 65
 	f.TargetHeading = heading(r.Start, r.End)
-	f.TargetAltitude = s.airport.Elevation + 3000
+	f.TargetAltitude = math.Max(f.Altitude, s.airport.Elevation+3000)
 	f.TargetSpeed = 210
-	f.Clearance = "Go around · runway heading · climb to " + fmt.Sprintf("%.0f ft", f.TargetAltitude)
+	altitudeInstruction := "climb to "
+	if f.TargetAltitude == f.Altitude {
+		altitudeInstruction = "maintain "
+	}
+	f.Clearance = "Go around · runway heading · " + altitudeInstruction + fmt.Sprintf("%.0f ft", f.TargetAltitude)
 	f.Alert = reason
 	s.stats.GoArounds++
 	s.log(f.Callsign+" going around: "+reason, "warning")
