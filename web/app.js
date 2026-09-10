@@ -601,11 +601,11 @@ $("reset-simulation").addEventListener("click", async () => {
 });
 document.addEventListener("keydown", (e) => {
   if (
-    /INPUT|SELECT|TEXTAREA|BUTTON/.test(document.activeElement.tagName) ||
+    /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) ||
     $("help").open
   )
     return;
-  if (e.code === "Space") {
+  if (e.code === "Space" && document.activeElement.tagName !== "BUTTON") {
     e.preventDefault();
     if (connected && state) control({ paused: !state.paused });
   }
