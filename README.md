@@ -143,6 +143,9 @@ The server has no sign-in requirement; anyone who can reach it can start a game.
 
 ## Play
 
+New to air traffic control? Start with the [Player Guide](PLAYER_GUIDE.md) for
+airport basics, a first-flight walkthrough, controls, and troubleshooting.
+
 - Click an aircraft or flight strip. A departure is already holding short when
   the session starts, so you can immediately issue a takeoff clearance.
 - For a departure at a gate, select a runway and **Taxi to runway**. The aircraft
